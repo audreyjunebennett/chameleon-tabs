@@ -1,0 +1,13 @@
+Chamie Windows Helper for Windows 11 (x64)
+
+1. Add Desktop App Tabs from the Chrome Web Store.
+2. Extract this ZIP, then double-click Install Chamie Windows Helper.
+3. Open a desktop app. Click Chamie in Chrome and choose its window.
+
+If the chameleon is hidden, open Chrome's puzzle-piece menu and pin
+Desktop App Tabs. If Chamie was open while you installed the helper,
+close and reopen the picker.
+
+The installer includes the helper and its Python runtime. If an app gets
+stuck, use Return all apps to desktop in Chamie or close Chrome and run
+Restore Chameleon Windows from the Start menu.

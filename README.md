@@ -6,6 +6,8 @@ The extension talks to a Python native messaging helper on the same Windows comp
 
 The Windows x64 installer in [Releases](https://github.com/audreyjunebennett/chameleon-tabs/releases) includes its own Python runtime. If the helper stops, use **Return all apps to desktop** in the picker. If that fails, close Chrome and use **Restore Chameleon Windows** from the Start menu.
 
+For the Chrome Web Store edition, build the helper-only ZIP from `packaging/store`. Put the dashboard's 32-character Item ID in `store-item-id.txt` at the package root. Include the bundled `ChameleonTabsHost.exe` and `Restore Chameleon Windows.cmd` under `payload`, along with the runtime notices under `licenses`. Upload the ZIP to the release linked from Chamie's picker.
+
 See the [privacy policy](PRIVACY.md) for how the extension handles tab and window information.
 
 ## Restore an existing installation
