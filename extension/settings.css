@@ -29,7 +29,6 @@ header {
 
 header img { flex: none; }
 p, h1 { margin: 0; }
-header p { color: #ebdff0; font-size: 14px; font-weight: 600; }
 h1 { font-size: 28px; line-height: 1.2; }
 form { padding: clamp(16px, 5vw, 28px); }
 fieldset { display: grid; gap: 10px; min-width: 0; margin: 0; padding: 0; border: 0; }
@@ -54,7 +53,7 @@ small { display: block; margin-top: 2px; color: #655671; font-size: 13px; }
 
 @media (forced-colors: active) {
   header { border-image: none; }
-  header p, small, #save-status { color: CanvasText; }
+  small, #save-status { color: CanvasText; }
   label:has(:checked) { border-color: Highlight; }
   label:has(:focus-visible) { outline-color: Highlight; }
 }
