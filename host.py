@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import struct
+import subprocess
 import sys
 import time
 from queue import Empty, Queue
@@ -159,6 +160,31 @@ def process_path(pid):
 
 def process_name(pid):
     return Path(process_path(pid)).name.lower()
+
+def process_started(pid):
+    kernel = ctypes.windll.kernel32
+    kernel.OpenProcess.restype = ctypes.c_void_p
+    handle = kernel.OpenProcess(0x1000, False, pid)
+    if not handle:
+        return None
+    times = (wintypes.FILETIME * 4)()
+    try:
+        if kernel.GetProcessTimes(ctypes.c_void_p(handle), *(ctypes.byref(times, i * ctypes.sizeof(wintypes.FILETIME)) for i in range(4))):
+            return str((times[0].dwHighDateTime << 32) | times[0].dwLowDateTime)
+        return None
+    finally:
+        kernel.CloseHandle(ctypes.c_void_p(handle))
+
+def launch_path(value):
+    if not isinstance(value, str):
+        return None
+    path = Path(value)
+    if (path.is_absolute() and len(path.drive) == 2 and path.drive[1] == ":"
+            and path.suffix.lower() == ".exe" and path.is_file()):
+        resolved = path.resolve()
+        if len(resolved.drive) == 2 and resolved.drive[1] == ":" and resolved.suffix.lower() == ".exe":
+            return resolved
+    return None
 
 def window_icon(hwnd, pid):
     from PIL import Image
@@ -527,6 +553,24 @@ def main():
                     reply["result"] = icons
                 elif command == "detach":
                     detach(tab,minimize=msg.get("minimize") is True)
+                elif command in {"findApp", "launchApp"}:
+                    path = launch_path(msg.get("path"))
+                    if not path:
+                        if command == "launchApp":
+                            raise ValueError("Windows could not find this app. Open it from Start, then pick it in Chamie.")
+                    elif command == "launchApp":
+                        subprocess.Popen([str(path)], cwd=path.parent, stdin=subprocess.DEVNULL,
+                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                         creationflags=subprocess.DETACHED_PROCESS)
+                    else:
+                        chrome, chrome_identity = listed_browsers.get(msg.get("windowId"), (None, None))
+                        if chrome and identity(chrome) == chrome_identity:
+                            used = {state["handle"] for state in states.values()}
+                            excluded = msg.get("exclude") or []
+                            matches = [item for item in list_windows(chrome)
+                                       if item["handle"] not in used and item["handle"] not in excluded
+                                       and Path(process_path(item["pid"])) == path]
+                            reply["result"] = matches
                 elif command == "attach":
                     window_id = msg.get("windowId")
                     chrome, chrome_identity = listed_browsers.get(window_id,(None,None))
@@ -537,6 +581,8 @@ def main():
                     item = next((w for w in list_windows(chrome) if all(w[k] == msg.get(k) for k in ("handle","pid","thread"))), None)
                     if not item or any(w["handle"] == item["handle"] for w in states.values()):
                         raise ValueError("That window is no longer available.")
+                    if msg.get("started") and process_started(item["pid"]) != msg["started"]:
+                        raise ValueError("The original window is no longer available.")
                     app = item["handle"]
                     states[tab] = dict(item, style=g.GetWindowLong(app,c.GWL_STYLE),
                                        clip_managed=True,original_region=saved_region(app),
@@ -551,6 +597,11 @@ def main():
                         reply["result"] = window_icon(app, item["pid"])
                     except Exception as error:
                         print(f"Window icon unavailable: {error}", file=sys.stderr)
+                elif command == "appIdentity":
+                    state = states.get(tab)
+                    if state:
+                        path = process_path(state["pid"])
+                        reply["result"] = {"path": path, "started": process_started(state["pid"])}
                 elif command == "suspend" and tab in states:
                     state = states[tab]
                     window_id = state.pop("window_id",None)

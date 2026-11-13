@@ -1,4 +1,6 @@
 const appUrl = chrome.runtime.getURL("app.html");
+const appKey = url => url?.startsWith(appUrl + "#") && /^[a-f0-9]{24}$/.test(url.slice(appUrl.length + 1))
+  ? url.slice(appUrl.length + 1) : null;
 const attached = new Map();
 const viewports = new Map();
 let bridge;
@@ -87,8 +89,60 @@ async function detach(tabId, minimize = false) {
   viewports.delete(tabId);
 }
 
+async function attachWindow(tab, key, item, remember = false) {
+  const windowId = tab.windowId;
+  const {handle, pid, thread, label, started} = item;
+  const icon = await request("attach", {tab: tab.id, windowId, handle, pid, thread, started});
+  attached.set(tab.id, {windowId, handle, label, icon, key});
+  if (remember) {
+    const identity = await request("appIdentity", {tab: tab.id});
+    if (identity?.path && identity.started) {
+      await chrome.storage.local.set({[key]: {handle, pid, thread, label, ...identity}});
+    }
+  }
+  const viewport = viewports.get(tab.id);
+  if (viewport) await request("viewport", {tab: tab.id, ...viewport});
+  await sync(windowId);
+  return {label, icon};
+}
+
+async function restoreApp(tab, key, launch) {
+  const current = attached.get(tab.id);
+  if (current) return {label: current.label, icon: current.icon};
+  const saved = (await chrome.storage.local.get(key))[key];
+  if (!saved) return;
+  const {windowId} = tab;
+  const windows = await request("list", {windowId});
+  const exact = windows.find(item => item.handle === saved.handle && item.pid === saved.pid && item.thread === saved.thread);
+  if (exact) {
+    try {
+      return await attachWindow(tab, key, {...exact, started: saved.started});
+    } catch (error) {
+      if (error.message !== "The original window is no longer available.") throw error;
+    }
+  }
+  if (!launch) return {label: saved.label, canOpen: true};
+  const before = await request("findApp", {windowId, path: saved.path});
+  if (before?.length === 1) return attachWindow(tab, key, before[0], true);
+  await request("launchApp", {path: saved.path});
+  const exclude = before?.map(item => item.handle) ?? [];
+  for (let attempt = 0; attempt < 20; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 400));
+    const candidates = await request("findApp", {windowId, path: saved.path, exclude});
+    if (candidates?.length === 1) {
+      const currentTab = await chrome.tabs.get(tab.id);
+      if (appKey(currentTab.url) === key && currentTab.windowId === windowId) {
+        return attachWindow(currentTab, key, candidates[0], true);
+      }
+      return;
+    }
+  }
+  throw new Error("Chamie couldn’t identify the app’s window. If it opened, select it from the picker.");
+}
+
 async function choose(sender, message) {
-  if (message.command === "viewport" && sender.url === appUrl && sender.tab) {
+  const key = appKey(sender.url);
+  if (message.command === "viewport" && key && sender.tab) {
     const {width, height} = message;
     if (!Number.isInteger(width) || !Number.isInteger(height)) return;
     viewports.set(sender.tab.id, {width, height});
@@ -97,14 +151,20 @@ async function choose(sender, message) {
     }
     return;
   }
-  if (message.command === "appInfo" && sender.url === appUrl && sender.tab) {
-    const tab = attached.get(sender.tab.id);
-    return tab && {label: tab.label, icon: tab.icon};
+  if ((message.command === "appInfo" || message.command === "openApp") && key && sender.tab) {
+    return restoreApp(sender.tab, key, message.command === "openApp");
+  }
+  if (message.command === "appInfo" && sender.url === appUrl) {
+    return;
   }
   if (sender.url !== chrome.runtime.getURL("picker.html")) throw new Error("Invalid picker.");
   if (message.command === "detachAll") {
     if (!bridge) await request("recover");
-    for (const id of attached.keys()) await detach(id);
+    for (const [id, app] of attached) {
+      await detach(id);
+      await chrome.storage.local.remove(app.key);
+      chrome.tabs.sendMessage(id, {command: "returnedToDesktop"}).catch(() => {});
+    }
     return;
   }
   const windowId = message.windowId;
@@ -127,13 +187,10 @@ async function choose(sender, message) {
     await chrome.tabs.update(existing[0], {active: true});
     return;
   }
-  const tab = await chrome.tabs.create({windowId, url: appUrl});
+  const newKey = crypto.randomUUID().replaceAll("-", "").slice(0, 24);
+  const tab = await chrome.tabs.create({windowId, url: appUrl + "#" + newKey});
   try {
-    const icon = await request("attach", {tab: tab.id, windowId, handle: message.handle, pid: message.pid, thread: message.thread});
-    attached.set(tab.id, {windowId, handle: message.handle, label: message.label, icon});
-    const viewport = viewports.get(tab.id);
-    if (viewport) await request("viewport", {tab: tab.id, ...viewport});
-    await sync(windowId);
+    await attachWindow(tab, newKey, message, true);
   } catch (error) {
     await detach(tab.id).catch(() => {});
     await chrome.tabs.remove(tab.id).catch(() => {});
@@ -172,7 +229,7 @@ chrome.tabs.onAttached.addListener((tabId, {newWindowId}) => serialize(async () 
   await sync(newWindowId);
 }));
 chrome.tabs.onUpdated.addListener((tabId, change, tab) => {
-  if (change.url && change.url !== appUrl) serialize(() => detach(tabId, true));
+  if (change.url && appKey(change.url) !== attached.get(tabId)?.key) serialize(() => detach(tabId, true));
   if (change.splitViewId !== undefined && [...attached.values()].some(app => app.windowId === tab.windowId)) {
     serialize(() => sync(tab.windowId));
   }
