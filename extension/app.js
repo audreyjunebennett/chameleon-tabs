@@ -33,6 +33,8 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     document.title = label;
   } else if (message.command === "helperStopped") {
     showStopped("The Windows helper stopped. Your desktop app may still be open.");
+  } else if (message.command === "attachmentFailed") {
+    showStopped("Windows couldn’t display this window in Chrome. It was returned to the desktop.");
   } else if (message.command === "returnedToDesktop") {
     status.textContent = "This app has returned to the desktop.";
     openApp.hidden = true;

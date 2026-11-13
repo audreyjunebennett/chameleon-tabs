@@ -500,27 +500,25 @@ def main():
         chrome = state["browser"]
         if not g.IsWindowVisible(chrome) or g.IsIconic(chrome):
             return None
-        bounds = renderer(chrome)
         left, top, right, bottom = g.GetClientRect(chrome)
         left, top = g.ClientToScreen(chrome, (left,top))
         right, bottom = g.ClientToScreen(chrome, (right,bottom))
         size = state.get("viewport")
         toolbar_height = state.get("toolbar_height")
-        if bounds:
-            x,y,r,b = bounds
-            # A stale renderer can already report the new origin but keep the old
-            # height. Reject partial surfaces before updating the native clip.
-            if abs(x-left) <= 2 and abs(r-right) <= 2 and top <= y < b and abs(b-bottom) <= 2:
+        # Select the renderer that fills the pane. Chrome can keep other child
+        # renderers around, including one for a toolbar popup.
+        for include_hidden in (False, True):
+            panes = [(x,y,r,b) for x,y,r,b in renderer_rects(chrome, include_hidden)
+                     if abs(x-left) <= 2 and abs(r-right) <= 2 and abs(b-bottom) <= 2
+                     and top + (30 if include_hidden else 0) - 2 <= y < b]
+            if len(panes) > 1 and size:
+                panes = [(x,y,r,b) for x,y,r,b in panes if abs((b-y)-size[1]) <= 2]
+            if len(panes) == 1:
+                x,y,r,b = panes[0]
                 state["toolbar_height"] = y-top
                 return max(x,left),y,min(r,right),min(b,bottom)
         if not size or toolbar_height is None:
             return None
-        # A covered renderer can keep its current bounds even while marked hidden.
-        covered = renderer(chrome,include_hidden=True)
-        if covered:
-            x,y,r,b = covered
-            if abs(x-left) <= 2 and abs(r-right) <= 2 and top+toolbar_height-2 <= y < b and abs(b-bottom) <= 2:
-                return covered
         # Chrome can discard the renderer HWND when covered. The extension page
         # still reports its physical size, and the viewport ends at the client bottom.
         width, height = size
@@ -558,12 +556,15 @@ def main():
                 visible.append((tab,state,chrome,bounds))
             else:
                 update_window(state,chrome,None)
+        failed = []
         for tab,state,chrome,bounds in visible:
             try:
                 update_window(state,chrome,bounds)
             except Exception as error:
                 print(f"Window update failed: {error}",file=sys.stderr)
                 detach(tab)
+                failed.append(tab)
+        return failed
 
     try:
         while True:
@@ -571,7 +572,9 @@ def main():
                 msg = messages.get(timeout=0.05 if states else 0.5)
             except Empty:
                 try:
-                    refresh()
+                    failed = refresh()
+                    if failed:
+                        send({"failed": failed})
                 except Exception as error:
                     print(f"Window update failed: {error}",file=sys.stderr)
                 continue
@@ -694,7 +697,9 @@ def main():
                     width,height = msg.get("width"),msg.get("height")
                     if all(type(value) is int and 0 < value < 32768 for value in (width,height)):
                         states[tab]["viewport"] = (width,height)
-                        refresh()
+                        failed = refresh()
+                        if failed:
+                            send({"failed": failed})
                 elif command == "active":
                     window_id = msg.get("windowId")
                     panes = msg.get("panes")
@@ -706,7 +711,7 @@ def main():
                         active_tabs[window_id] = tab
                     else:
                         active_tabs.pop(window_id,None)
-                    refresh()
+                    reply["result"] = refresh()
                 else:
                     raise ValueError("Unknown command.")
             except Exception as error:

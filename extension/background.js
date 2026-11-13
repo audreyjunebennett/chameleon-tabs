@@ -13,11 +13,19 @@ function helperError(message) {
   return Object.assign(new Error(message), {code: missing ? "helperSetup" : "helperStopped"});
 }
 
+function reportFailedAttachments(failed = []) {
+  for (const id of failed) {
+    attached.delete(id);
+    chrome.tabs.sendMessage(id, {command: "attachmentFailed"}).catch(() => {});
+  }
+}
+
 function request(command, data = {}) {
   if (!bridge) {
     const port = chrome.runtime.connectNative("com.local.desktop_app_tabs");
     bridge = port;
-    port.onMessage.addListener(({id, result, error}) => {
+    port.onMessage.addListener(({id, result, error, failed}) => {
+      if (failed) reportFailedAttachments(failed);
       const reply = pending.get(id);
       if (!reply) return;
       pending.delete(id);
@@ -79,7 +87,9 @@ async function sync(windowId) {
         .sort((a, b) => a.index - b.index)
         .map(pane => attached.get(pane.id)?.windowId === windowId ? pane.id : null)
     : null;
-  await request("active", {windowId, tab: tab?.windowId === windowId ? active.id : null, panes});
+  const failed = await request("active", {windowId, tab: tab?.windowId === windowId ? active.id : null, panes});
+  reportFailedAttachments(failed ?? []);
+  return failed;
 }
 
 async function detach(tabId, minimize = false, showDesktop = false) {
@@ -102,7 +112,10 @@ async function attachWindow(tab, key, item, remember = false) {
   }
   const viewport = viewports.get(tab.id);
   if (viewport) await request("viewport", {tab: tab.id, ...viewport});
-  await sync(windowId);
+  const failed = await sync(windowId);
+  if (failed?.includes(tab.id) || !attached.has(tab.id)) {
+    throw new Error("Windows couldn’t display this window in Chrome. It was returned to the desktop.");
+  }
   return {label, icon};
 }
 
