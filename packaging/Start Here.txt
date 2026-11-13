@@ -1,0 +1,16 @@
+Chameleon Tabs for Windows 11 (x64)
+
+1. Extract the whole ZIP, then double-click Install Chameleon Tabs.cmd.
+2. In Chrome, go to chrome://extensions. Turn on Developer mode, then
+   click Load unpacked. Paste the folder path printed by the installer
+   into the folder picker and select that folder.
+3. Open Microsoft Word from the Windows Start menu. In Chrome, click
+   the chameleon and select the Word window. If you don't see the
+   chameleon, open Chrome's puzzle-piece menu and pin Desktop App Tabs.
+
+You'll need your own installation of desktop Word. The ZIP includes
+the Windows helper and its Python runtime. The helper runs when Chrome
+connects to it.
+
+If the helper stops, try Return all apps to desktop in Chamie. If that
+fails, close Chrome and run Restore Chameleon Windows from the Start menu.

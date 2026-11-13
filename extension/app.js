@@ -1,5 +1,11 @@
-const label = new URL(location.href).hash.slice(1);
-if (label) document.title = decodeURIComponent(label);
+let label = document.title;
+const status = document.getElementById("status");
+const recovery = document.getElementById("recovery");
+
+function showStopped(message) {
+  status.textContent = message;
+  recovery.hidden = false;
+}
 
 function reportViewport() {
   chrome.runtime.sendMessage({
@@ -23,15 +29,24 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     }, 2000);
     respond(true);
   } else if (message.command === "restoreTitle") {
-    if (label) document.title = decodeURIComponent(label);
+    document.title = label;
+  } else if (message.command === "helperStopped") {
+    showStopped("The Windows helper stopped. Your desktop app may still be open.");
   }
 });
 
-chrome.runtime.sendMessage({command: "tabIcon"}).then(({result}) => {
-  if (!result?.startsWith("data:image/png;base64,")) return;
+chrome.runtime.sendMessage({command: "appInfo"}).then(({result}) => {
+  if (!result) {
+    showStopped("This tab has no attached app. Use Chamie to attach an open window.");
+    return;
+  }
+  label = result.label;
+  document.title = label;
+  status.textContent = "Enlarge this Chrome window if part of the app is cropped.";
+  if (!result.icon?.startsWith("data:image/png;base64,")) return;
   const icon = document.createElement("link");
   icon.rel = "icon";
   icon.type = "image/png";
-  icon.href = result;
+  icon.href = result.icon;
   document.head.append(icon);
-}).catch(() => {});
+}).catch(() => showStopped("Chrome could not reconnect to this desktop app."));

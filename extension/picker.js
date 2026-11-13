@@ -1,11 +1,23 @@
 const windows = document.getElementById("windows");
 const status = document.getElementById("status");
 const detach = document.getElementById("detach");
+const setup = document.getElementById("setup");
+
+function showError(error) {
+  setup.hidden = error.code !== "helperSetup";
+  if (error.code === "helperSetup") {
+    status.textContent = "Install the Windows helper once, then reopen Chamie.";
+  } else if (error.code === "helperStopped") {
+    status.textContent = "The Windows helper stopped. Try Return all apps to desktop. If that fails, close Chrome and run Restore Chameleon Windows from the Start menu.";
+  } else {
+    status.textContent = error.message;
+  }
+}
 
 async function send(command, fields = {}) {
   const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
   const response = await chrome.runtime.sendMessage({command, windowId: tab?.windowId, ...fields});
-  if (response.error) throw new Error(response.error);
+  if (response.error) throw Object.assign(new Error(response.error), {code: response.code});
   return response.result;
 }
 
@@ -17,7 +29,7 @@ async function attach(item) {
     await send("attach", item);
     window.close();
   } catch (error) {
-    status.textContent = error.message;
+    showError(error);
     windows.inert = false;
     detach.disabled = false;
   }
@@ -49,7 +61,7 @@ detach.addEventListener("click", async () => {
     await send("detachAll");
     window.close();
   } catch (error) {
-    status.textContent = error.message;
+    showError(error);
     windows.inert = false;
     detach.disabled = false;
   }
@@ -90,6 +102,6 @@ send("list").then(async items => {
       image.src = source;
     }
   }
-}).catch(error => { status.textContent = error.message; });
+}).catch(showError);
 
 

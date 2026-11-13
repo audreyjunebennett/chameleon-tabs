@@ -29,7 +29,7 @@ def read():
             break
         yield json.loads(data)
 
-def renderer(browser, include_hidden=False):
+def renderer_rects(browser, include_hidden=False):
     candidates = []
     def collect(hwnd, _):
         if g.GetClassName(hwnd) == "Chrome_RenderWidgetHostHWND":
@@ -39,6 +39,10 @@ def renderer(browser, include_hidden=False):
                 candidates.append((left, top, right, bottom))
         return True
     g.EnumChildWindows(browser, collect, None)
+    return sorted(set(candidates))
+
+def renderer(browser, include_hidden=False):
+    candidates = renderer_rects(browser, include_hidden)
     return candidates[0] if len(candidates) == 1 else None
 
 def below_browser(app, browser):
@@ -358,7 +362,8 @@ def update_window(state, browser, bounds):
 def main():
     from threading import Thread
     ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
-    root = Path(__file__).resolve().parent
+    # A bundled helper keeps the recovery journal beside the executable.
+    root = Path(sys.executable if getattr(sys, "frozen", False) else __file__).resolve().parent
     journal = root/"restore-windows.json"
     recover(journal)
     if sys.argv[1:] == ["--recover"]:
@@ -383,6 +388,7 @@ def main():
     Thread(target=receive, daemon=True).start()
     states = {}
     active_tabs = {}
+    split_panes = {}
     selected_window_id = None
     listed_browsers = {}
 
@@ -450,7 +456,18 @@ def main():
             if chrome and identity(chrome) != tuple(state["browser_identity"]):
                 update_window(state,chrome,None)
                 continue  # Chrome may remove the source window during a tab move.
-            bounds = bounds_for(state) if chrome and active_tabs.get(window_id) == tab else None
+            bounds = None
+            panes = split_panes.get(window_id)
+            if chrome and panes and tab in panes and g.IsWindowVisible(chrome) and not g.IsIconic(chrome):
+                left, top = g.ClientToScreen(chrome, (0, 0))
+                right, bottom = g.ClientToScreen(chrome, g.GetClientRect(chrome)[2:])
+                rects = [rect for rect in renderer_rects(chrome, include_hidden=True)
+                         if left <= rect[0] < rect[2] <= right and top + 30 <= rect[1] < rect[3] <= bottom
+                         and rect[3] >= bottom - 100]
+                if len(rects) == 2 and rects[0][2] <= rects[1][0] and abs(rects[0][1] - rects[1][1]) <= 2:
+                    bounds = rects[panes.index(tab)]
+            elif chrome and not panes and active_tabs.get(window_id) == tab:
+                bounds = bounds_for(state)
             if bounds:
                 visible.append((tab,state,chrome,bounds))
             else:
@@ -477,7 +494,10 @@ def main():
             reply = {"id": msg["id"]}
             try:
                 command, tab = msg["command"], msg.get("tab")
-                if command == "list":
+                if command == "recover":
+                    # Startup has already restored any windows left by a stopped helper.
+                    pass
+                elif command == "list":
                     requested = msg.get("windowId")
                     known = next((state["browser"] for state in states.values()
                                   if state.get("window_id") == requested and state.get("browser")),None)
@@ -556,6 +576,11 @@ def main():
                         refresh()
                 elif command == "active":
                     window_id = msg.get("windowId")
+                    panes = msg.get("panes")
+                    if isinstance(panes, list) and len(panes) == 2 and any(pane in states for pane in panes):
+                        split_panes[window_id] = panes
+                    else:
+                        split_panes.pop(window_id, None)
                     if tab in states and states[tab].get("window_id") == window_id:
                         active_tabs[window_id] = tab
                     else:

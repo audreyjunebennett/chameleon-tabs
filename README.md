@@ -4,6 +4,10 @@ Desktop App Tabs lets you attach an open Windows application to a tab in Chrome.
 
 The extension talks to a Python native messaging helper on the same Windows computer. The helper needs Python, Pillow, and pywin32. This repository contains the unpacked Chrome extension and the helper source.
 
+The Windows x64 installer in [Releases](https://github.com/audreyjunebennett/chameleon-tabs/releases) includes its own Python runtime. If the helper stops, use **Return all apps to desktop** in the picker. If that fails, close Chrome and use **Restore Chameleon Windows** from the Start menu.
+
+See the [privacy policy](PRIVACY.md) for how the extension handles tab and window information.
+
 ## Restore an existing installation
 
 In the existing Desktop App Tabs installation, replace the `extension` directory and the two Python source files, keeping the local native messaging registration and launcher. Reload Desktop App Tabs on the Chrome extensions page and reattach your apps.
