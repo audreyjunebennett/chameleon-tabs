@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Desktop App Tabs",
-  "version": "0.3.22",
+  "version": "0.3.23",
   "permissions": [
     "nativeMessaging",
     "tabs",

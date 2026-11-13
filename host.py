@@ -130,6 +130,8 @@ def restore_window(state, minimize=False, show_desktop=False):
     hwnd = state["handle"]
     if identity(hwnd) != (state["thread"], state["pid"]):
         return
+    if g.GetWindowLong(hwnd,c.GWL_EXSTYLE) & c.WS_EX_TOPMOST and not state["ex_style"] & c.WS_EX_TOPMOST:
+        g.SetWindowPos(hwnd,c.HWND_NOTOPMOST,0,0,0,0,c.SWP_NOACTIVATE | c.SWP_NOMOVE | c.SWP_NOSIZE)
     if state.get("clip_managed"):
         g.ShowWindow(hwnd,c.SW_HIDE)
         apply_region(hwnd,state.get("original_region"))
@@ -389,11 +391,17 @@ def recover(journal):
             restore_window(window)
         journal.unlink()
 
-def update_window(state, browser, bounds):
+def update_window(state, browser, bounds, foreground_group=False):
     app = state["handle"]
+    order_flags = (c.SWP_NOACTIVATE | c.SWP_NOMOVE | c.SWP_NOSIZE |
+                   c.SWP_NOOWNERZORDER | c.SWP_NOSENDCHANGING)
     if not bounds:
         if g.IsWindowVisible(app):
             g.ShowWindow(app,c.SW_HIDE)
+    if state.get("raised") and (not bounds or not foreground_group):
+        g.SetWindowPos(app,c.HWND_NOTOPMOST,0,0,0,0,order_flags)
+        state["raised"] = False
+    if not bounds:
         return
     left, top, right, bottom = bounds
     size = right-left, bottom-top
@@ -428,7 +436,7 @@ def update_window(state, browser, bounds):
                 apply_region(app,state["original_region"],limit)
                 state["clip"] = limit
         anchor = directly_above(browser)
-        order = c.SWP_NOZORDER if anchor == app else 0
+        order = c.SWP_NOZORDER if anchor == app or state.get("raised") else 0
         g.SetWindowPos(app,anchor,left,top,*size,order | flags)
         actual = g.GetWindowRect(app)
         x,y,r,b = actual
@@ -448,14 +456,12 @@ def update_window(state, browser, bounds):
     if changed or showing:
         g.RedrawWindow(app,None,None,c.RDW_INVALIDATE | c.RDW_ALLCHILDREN)
     if below_browser(app,browser):
-        order_flags = (c.SWP_NOACTIVATE | c.SWP_NOMOVE | c.SWP_NOSIZE |
-                       c.SWP_NOOWNERZORDER | c.SWP_NOSENDCHANGING)
-        anchor = directly_above(browser)
-        g.SetWindowPos(app,anchor,0,0,0,0,order_flags)
-        foreground = g.GetForegroundWindow()
-        if (anchor != c.HWND_TOP and below_browser(app,browser)
-                and (foreground == browser or ctypes.windll.user32.GetAncestor(foreground, 3) == browser)):
-            g.SetWindowPos(app,c.HWND_TOP,0,0,0,0,order_flags)
+        g.SetWindowPos(app,directly_above(browser),0,0,0,0,order_flags)
+        if foreground_group and below_browser(app,browser):
+            # Some windows stay in a lower band even after a normal raise.
+            # Keep this fallback only while the browser or its app has focus.
+            g.SetWindowPos(app,c.HWND_TOPMOST,0,0,0,0,order_flags)
+            state["raised"] = True
 
 def main():
     from threading import Thread
@@ -543,6 +549,9 @@ def main():
 
     def refresh():
         visible = []
+        foreground = g.GetForegroundWindow()
+        focused_browser = next((state.get("browser") for state in states.values()
+                                if state["handle"] == foreground), foreground)
         for tab, state in list(states.items()):
             if identity(state["handle"]) != (state["thread"],state["pid"]):
                 detach(tab)
@@ -572,7 +581,7 @@ def main():
         failed = []
         for tab,state,chrome,bounds in visible:
             try:
-                update_window(state,chrome,bounds)
+                update_window(state,chrome,bounds,foreground_group=chrome == focused_browser)
             except Exception as error:
                 print(f"Window update failed: {error}",file=sys.stderr)
                 detach(tab)
