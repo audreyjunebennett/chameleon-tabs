@@ -58,10 +58,15 @@ def below_browser(app, browser):
 
 def directly_above(browser):
     previous = g.GetWindow(browser,c.GW_HWNDPREV)
-    # A normal app belongs just above Chrome in the normal z-order band.
-    if not previous or g.GetWindowLong(previous,c.GWL_EXSTYLE) & c.WS_EX_TOPMOST:
-        return c.HWND_TOP
-    return previous
+    # Inserting after an owned window can keep the app behind its owner.
+    # Use a top-level window as the anchor, skipping tooltips and IME windows.
+    while previous:
+        if g.GetWindowLong(previous,c.GWL_EXSTYLE) & c.WS_EX_TOPMOST:
+            break
+        if g.IsWindowVisible(previous) and not g.GetWindow(previous,c.GW_OWNER):
+            return previous
+        previous = g.GetWindow(previous,c.GW_HWNDPREV)
+    return c.HWND_TOP
 
 def identity(hwnd):
     if g.IsWindow(hwnd):
@@ -443,7 +448,14 @@ def update_window(state, browser, bounds):
     if changed or showing:
         g.RedrawWindow(app,None,None,c.RDW_INVALIDATE | c.RDW_ALLCHILDREN)
     if below_browser(app,browser):
-        g.SetWindowPos(app,directly_above(browser),0,0,0,0,c.SWP_NOACTIVATE | c.SWP_NOMOVE | c.SWP_NOSIZE)
+        order_flags = (c.SWP_NOACTIVATE | c.SWP_NOMOVE | c.SWP_NOSIZE |
+                       c.SWP_NOOWNERZORDER | c.SWP_NOSENDCHANGING)
+        anchor = directly_above(browser)
+        g.SetWindowPos(app,anchor,0,0,0,0,order_flags)
+        foreground = g.GetForegroundWindow()
+        if (anchor != c.HWND_TOP and below_browser(app,browser)
+                and (foreground == browser or ctypes.windll.user32.GetAncestor(foreground, 3) == browser)):
+            g.SetWindowPos(app,c.HWND_TOP,0,0,0,0,order_flags)
 
 def main():
     from threading import Thread
