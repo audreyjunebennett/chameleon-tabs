@@ -96,7 +96,7 @@ async function attachWindow(tab, key, item, remember = false) {
   attached.set(tab.id, {windowId, handle, label, icon, key});
   if (remember) {
     const identity = await request("appIdentity", {tab: tab.id});
-    if (identity?.path && identity.started) {
+    if ((identity?.path || identity?.appId) && identity.started) {
       await chrome.storage.local.set({[key]: {handle, pid, thread, label, ...identity}});
     }
   }
@@ -122,13 +122,14 @@ async function restoreApp(tab, key, launch) {
     }
   }
   if (!launch) return {label: saved.label, canOpen: true};
-  const before = await request("findApp", {windowId, path: saved.path});
+  const target = {path: saved.path, appId: saved.appId};
+  const before = await request("findApp", {windowId, ...target});
   if (before?.length === 1) return attachWindow(tab, key, before[0], true);
-  await request("launchApp", {path: saved.path});
+  await request("launchApp", target);
   const exclude = before?.map(item => item.handle) ?? [];
   for (let attempt = 0; attempt < 20; attempt++) {
     await new Promise(resolve => setTimeout(resolve, 400));
-    const candidates = await request("findApp", {windowId, path: saved.path, exclude});
+    const candidates = await request("findApp", {windowId, ...target, exclude});
     if (candidates?.length === 1) {
       const currentTab = await chrome.tabs.get(tab.id);
       if (appKey(currentTab.url) === key && currentTab.windowId === windowId) {

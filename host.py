@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 import struct
 import subprocess
+import re
+import uuid
 import sys
 import time
 from queue import Empty, Queue
@@ -184,6 +186,60 @@ def launch_path(value):
         resolved = path.resolve()
         if len(resolved.drive) == 2 and resolved.drive[1] == ":" and resolved.suffix.lower() == ".exe":
             return resolved
+    return None
+
+def process_app_id(pid):
+    kernel = ctypes.windll.kernel32
+    kernel.OpenProcess.restype = ctypes.c_void_p
+    handle = kernel.OpenProcess(0x1000, False, pid)
+    if not handle:
+        return None
+    try:
+        length = wintypes.UINT()
+        if kernel.GetApplicationUserModelId(ctypes.c_void_p(handle), ctypes.byref(length), None) != 122:
+            return None
+        app_id = ctypes.create_unicode_buffer(length.value)
+        if kernel.GetApplicationUserModelId(ctypes.c_void_p(handle), ctypes.byref(length), app_id) == 0:
+            return app_id.value
+        return None
+    finally:
+        kernel.CloseHandle(ctypes.c_void_p(handle))
+
+def activate_packaged_app(app_id):
+    if not isinstance(app_id, str) or not re.fullmatch(r"[\w.-]+_[a-z0-9]{13}![\w.-]+", app_id, re.ASCII):
+        raise ValueError("Windows could not identify this installed app.")
+    ole = ctypes.OleDLL("ole32")
+    ole.CoInitializeEx(None, 2)
+    manager = ctypes.c_void_p()
+    try:
+        clsid = uuid.UUID("45BA127D-10A8-46EA-8AB7-56EA9078943C").bytes_le
+        iid = uuid.UUID("2e941141-7f97-4756-ba1d-9decde894a3d").bytes_le
+        ole.CoCreateInstance(clsid, None, 4, iid, ctypes.byref(manager))
+        methods = ctypes.cast(manager, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))).contents
+        release = ctypes.WINFUNCTYPE(wintypes.ULONG, ctypes.c_void_p)(methods[2])
+        activate = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p, wintypes.LPCWSTR,
+                                     wintypes.LPCWSTR, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD))(methods[3])
+        try:
+            pid = wintypes.DWORD()
+            result = activate(manager, app_id, None, 2, ctypes.byref(pid))
+            if result < 0:
+                raise OSError(f"App activation failed (0x{result & 0xffffffff:08X})")
+        finally:
+            release(manager)
+    finally:
+        ole.CoUninitialize()
+
+def saved_app_id(msg):
+    app_id = msg.get("appId")
+    if app_id:
+        return app_id
+    # Older Spotify tabs saved the versioned Store executable path only.
+    path = msg.get("path")
+    if isinstance(path, str):
+        executable = Path(path)
+        if (executable.name.lower() == "spotify.exe" and executable.parent.parent.name.lower() == "windowsapps"
+                and re.fullmatch(r"spotifyab\.spotifymusic_[\d.]+_\w+__zpdnekdrzrea0", executable.parent.name, re.I)):
+            return "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify"
     return None
 
 def window_icon(hwnd, pid):
@@ -554,14 +610,21 @@ def main():
                 elif command == "detach":
                     detach(tab,minimize=msg.get("minimize") is True)
                 elif command in {"findApp", "launchApp"}:
-                    path = launch_path(msg.get("path"))
-                    if not path:
+                    app_id = saved_app_id(msg)
+                    path = None if app_id else launch_path(msg.get("path"))
+                    if not path and not app_id:
                         if command == "launchApp":
                             raise ValueError("Windows could not find this app. Open it from Start, then pick it in Chamie.")
                     elif command == "launchApp":
-                        subprocess.Popen([str(path)], cwd=path.parent, stdin=subprocess.DEVNULL,
-                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                         creationflags=subprocess.DETACHED_PROCESS)
+                        try:
+                            if app_id:
+                                activate_packaged_app(app_id)
+                            else:
+                                subprocess.Popen([str(path)], cwd=path.parent, stdin=subprocess.DEVNULL,
+                                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                                 creationflags=subprocess.DETACHED_PROCESS)
+                        except OSError as error:
+                            raise ValueError("Windows couldn't open this app. Open it from Start, then select it in Chamie.") from error
                     else:
                         chrome, chrome_identity = listed_browsers.get(msg.get("windowId"), (None, None))
                         if chrome and identity(chrome) == chrome_identity:
@@ -569,7 +632,8 @@ def main():
                             excluded = msg.get("exclude") or []
                             matches = [item for item in list_windows(chrome)
                                        if item["handle"] not in used and item["handle"] not in excluded
-                                       and Path(process_path(item["pid"])) == path]
+                                       and (process_app_id(item["pid"]) == app_id if app_id
+                                            else Path(process_path(item["pid"])) == path)]
                             reply["result"] = matches
                 elif command == "attach":
                     window_id = msg.get("windowId")
@@ -601,7 +665,8 @@ def main():
                     state = states.get(tab)
                     if state:
                         path = process_path(state["pid"])
-                        reply["result"] = {"path": path, "started": process_started(state["pid"])}
+                        reply["result"] = {"path": path, "appId": process_app_id(state["pid"]),
+                                           "started": process_started(state["pid"])}
                 elif command == "suspend" and tab in states:
                     state = states[tab]
                     window_id = state.pop("window_id",None)
