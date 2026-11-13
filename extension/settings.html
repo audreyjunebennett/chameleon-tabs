@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Desktop App Tabs Settings</title>
+  <link rel="icon" href="icons/chameleon-32.png">
+  <link rel="stylesheet" href="settings.css">
+  <script src="settings.js" defer></script>
+</head>
+<body>
+  <main>
+    <header>
+      <img src="icons/chameleon-128.png" width="56" height="56" alt="">
+      <div>
+        <p>Desktop App Tabs</p>
+        <h1>Settings</h1>
+      </div>
+    </header>
+    <form>
+      <fieldset disabled>
+        <legend>When I close an app tab</legend>
+        <label>
+          <input type="radio" name="closeBehavior" value="minimize" aria-describedby="minimize-detail" checked>
+          <span><strong>Minimize the app</strong><small id="minimize-detail">Find it on the Windows taskbar when you need it.</small></span>
+        </label>
+        <label>
+          <input type="radio" name="closeBehavior" value="desktop" aria-describedby="desktop-detail">
+          <span><strong>Return it to the desktop</strong><small id="desktop-detail">Restore its window to where it was before you attached it.</small></span>
+        </label>
+      </fieldset>
+      <p id="save-status" role="status"></p>
+    </form>
+  </main>
+</body>
+</html>

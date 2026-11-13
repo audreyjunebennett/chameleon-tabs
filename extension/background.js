@@ -82,9 +82,9 @@ async function sync(windowId) {
   await request("active", {windowId, tab: tab?.windowId === windowId ? active.id : null, panes});
 }
 
-async function detach(tabId, minimize = false) {
+async function detach(tabId, minimize = false, showDesktop = false) {
   if (!attached.has(tabId)) return;
-  if (bridge) await request("detach", {tab: tabId, minimize});
+  if (bridge) await request("detach", {tab: tabId, minimize, showDesktop});
   attached.delete(tabId);
   viewports.delete(tabId);
 }
@@ -213,7 +213,10 @@ chrome.tabs.onActivated.addListener(({windowId}) => {
 });
 chrome.tabs.onRemoved.addListener(tabId => serialize(async () => {
   viewports.delete(tabId);
-  await detach(tabId, true);
+  if (attached.has(tabId)) {
+    const {closeBehavior} = await chrome.storage.local.get("closeBehavior");
+    await detach(tabId, closeBehavior !== "desktop", closeBehavior === "desktop");
+  }
 }));
 chrome.tabs.onDetached.addListener(tabId => serialize(async () => {
   const tab = attached.get(tabId);

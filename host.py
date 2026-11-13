@@ -121,7 +121,7 @@ def apply_region(hwnd, original, clip=None):
         if region:
             g.DeleteObject(region)
 
-def restore_window(state, minimize=False):
+def restore_window(state, minimize=False, show_desktop=False):
     hwnd = state["handle"]
     if identity(hwnd) != (state["thread"], state["pid"]):
         return
@@ -140,6 +140,10 @@ def restore_window(state, minimize=False):
         if show == c.SW_SHOWMAXIMIZED:
             flags |= 2  # WPF_RESTORETOMAXIMIZED
         show = c.SW_SHOWMINNOACTIVE
+    elif show_desktop and show in (c.SW_SHOWMINIMIZED, c.SW_SHOWMINNOACTIVE, c.SW_MINIMIZE):
+        style &= ~(c.WS_MINIMIZE | c.WS_MAXIMIZE)
+        show = c.SW_SHOWMAXIMIZED if flags & 2 else c.SW_SHOWNORMAL
+        flags &= ~2
     g.SetWindowLong(hwnd, c.GWL_STYLE, style)
     g.SetWindowPlacement(hwnd, (flags, show, tuple(minimum), tuple(maximum), tuple(normal)))
     g.SetWindowPos(hwnd, 0, 0, 0, 0, 0, c.SWP_FRAMECHANGED | c.SWP_NOACTIVATE |
@@ -482,10 +486,10 @@ def main():
         else:
             journal.unlink(missing_ok=True)
 
-    def detach(tab, minimize=False):
+    def detach(tab, minimize=False, show_desktop=False):
         state = states.get(tab)
         if state:
-            restore_window(state,minimize)
+            restore_window(state, minimize, show_desktop)
             window_id = state.get("window_id")
             if active_tabs.get(window_id) == tab:
                 active_tabs.pop(window_id,None)
@@ -608,7 +612,8 @@ def main():
                                     print(f"Window icon unavailable: {error}", file=sys.stderr)
                     reply["result"] = icons
                 elif command == "detach":
-                    detach(tab,minimize=msg.get("minimize") is True)
+                    detach(tab, minimize=msg.get("minimize") is True,
+                           show_desktop=msg.get("showDesktop") is True)
                 elif command in {"findApp", "launchApp"}:
                     app_id = saved_app_id(msg)
                     path = None if app_id else launch_path(msg.get("path"))

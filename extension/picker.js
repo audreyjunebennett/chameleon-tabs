@@ -3,6 +3,15 @@ const status = document.getElementById("status");
 const detach = document.getElementById("detach");
 const setup = document.getElementById("setup");
 
+document.getElementById("settings").addEventListener("click", async () => {
+  try {
+    await chrome.runtime.openOptionsPage();
+    window.close();
+  } catch (error) {
+    showError(error);
+  }
+});
+
 function showError(error) {
   setup.hidden = error.code !== "helperSetup";
   if (error.code === "helperSetup") {

@@ -30,6 +30,20 @@ header {
 h1, h2, p { margin: 0; }
 h1 { font-size: 17px; font-weight: 650; line-height: 1.25; }
 header p { margin-top: 4px; color: #ebdff0; font-size: 12px; }
+#settings {
+  flex: none;
+  margin-left: auto;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid #80648d;
+  border-radius: 9px;
+  background: #482c56;
+  color: #fbe8fa;
+  font: 20px/1 "Segoe UI Symbol", sans-serif;
+}
+#settings:hover { background: #5f3b70; }
+#settings:focus-visible { outline-color: #f6b9e5; }
 main { padding: 12px 13px 10px; }
 h2 { margin: 0 0 7px 3px; font-size: 13px; font-weight: 650; }
 
@@ -108,4 +122,5 @@ footer { margin: 0 13px; padding: 8px 2px 10px; border-top: 1px solid #e7deee; }
   body, header { border: 1px solid CanvasText; color: CanvasText; background: Canvas; }
   header p, #status, #detach { color: CanvasText; }
   button:focus-visible { outline-color: Highlight; }
+  #settings:focus-visible { outline-color: Highlight; }
 }
