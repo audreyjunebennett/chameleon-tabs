@@ -3,6 +3,7 @@ const appKey = url => url?.startsWith(appUrl + "#") && /^[a-f0-9]{24}$/.test(url
   ? url.slice(appUrl.length + 1) : null;
 const attached = new Map();
 const viewports = new Map();
+const reconnecting = new Map();
 let bridge;
 let nextId = 0;
 const pending = new Map();
@@ -24,8 +25,9 @@ function request(command, data = {}) {
   if (!bridge) {
     const port = chrome.runtime.connectNative("com.local.desktop_app_tabs");
     bridge = port;
-    port.onMessage.addListener(({id, result, error, failed}) => {
+    port.onMessage.addListener(({id, result, error, failed, closed, since}) => {
       if (failed) reportFailedAttachments(failed);
+      if (Number.isInteger(closed)) reconnectClosedWindow(closed, since);
       const reply = pending.get(id);
       if (!reply) return;
       pending.delete(id);
@@ -41,6 +43,7 @@ function request(command, data = {}) {
         chrome.tabs.sendMessage(id, {command: "helperStopped"}).catch(() => {});
       }
       attached.clear();
+      reconnecting.clear();
       viewports.clear();
       for (const reply of pending.values()) {
         clearTimeout(reply.timer);
@@ -119,9 +122,58 @@ async function attachWindow(tab, key, item, remember = false) {
   return {label, icon};
 }
 
+function reconnectClosedWindow(tabId, since) {
+  const app = attached.get(tabId);
+  if (!app) return;
+  attached.delete(tabId);
+  reconnecting.set(tabId, app);
+  chrome.tabs.sendMessage(tabId, {command: "reconnecting"}).catch(() => {});
+  const deadline = Date.now() + 25000;
+  async function check() {
+    if (reconnecting.get(tabId) !== app) return;
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (appKey(tab?.url) !== app.key) {
+      reconnecting.delete(tabId);
+      return;
+    }
+    const saved = (await chrome.storage.local.get(app.key))[app.key];
+    if (saved && Date.now() < deadline) {
+      const target = {path: saved.path, appId: saved.appId};
+      await request("list", {windowId: tab.windowId, reconnect: true});
+      const candidates = await request("findApp", {windowId: tab.windowId, ...target, since, originalStarted: saved.started});
+      const otherKeys = [...reconnecting].filter(([id]) => id !== tabId).map(([, other]) => other.key);
+      const otherApps = Object.values(await chrome.storage.local.get(otherKeys));
+      const ambiguous = otherApps.some(other => target.appId ? other.appId === target.appId : other.path === target.path);
+      if (candidates?.length === 1 && !ambiguous) {
+        const currentTab = await chrome.tabs.get(tabId).catch(() => null);
+        if (appKey(currentTab?.url) === app.key && currentTab.windowId === tab.windowId) {
+          const result = await attachWindow(currentTab, app.key, candidates[0], true);
+          reconnecting.delete(tabId);
+          chrome.tabs.sendMessage(tabId, {command: "reconnected", result}).catch(() => {});
+          return;
+        }
+      }
+      setTimeout(schedule, 1000);
+      return;
+    }
+    reconnecting.delete(tabId);
+    chrome.tabs.sendMessage(tabId, {command: "reconnected", result: {label: app.label, canOpen: !!saved}}).catch(() => {});
+  }
+  function schedule() {
+    serialize(check).catch(error => {
+      reconnecting.delete(tabId);
+      chrome.tabs.sendMessage(tabId, {command: "reconnectError", message: error.message}).catch(() => {});
+    });
+  }
+  setTimeout(schedule, 1000);
+}
+
 async function restoreApp(tab, key, launch) {
   const current = attached.get(tab.id);
   if (current) return {label: current.label, icon: current.icon};
+  const waiting = reconnecting.get(tab.id);
+  if (waiting && !launch) return {label: waiting.label, reconnecting: true};
+  if (launch) reconnecting.delete(tab.id);
   const saved = (await chrome.storage.local.get(key))[key];
   if (!saved) return;
   const {windowId} = tab;
@@ -173,6 +225,7 @@ async function choose(sender, message) {
   }
   if (sender.url !== chrome.runtime.getURL("picker.html")) throw new Error("Invalid picker.");
   if (message.command === "detachAll") {
+    reconnecting.clear();
     if (!bridge) await request("recover");
     for (const [id, app] of attached) {
       await detach(id);
@@ -225,6 +278,7 @@ chrome.tabs.onActivated.addListener(({windowId}) => {
   });
 });
 chrome.tabs.onRemoved.addListener(tabId => serialize(async () => {
+  reconnecting.delete(tabId);
   viewports.delete(tabId);
   if (attached.has(tabId)) {
     const {closeBehavior} = await chrome.storage.local.get("closeBehavior");
@@ -246,6 +300,7 @@ chrome.tabs.onAttached.addListener((tabId, {newWindowId}) => serialize(async () 
   await sync(newWindowId);
 }));
 chrome.tabs.onUpdated.addListener((tabId, change, tab) => {
+  if (change.url && appKey(change.url) !== reconnecting.get(tabId)?.key) reconnecting.delete(tabId);
   if (change.url && appKey(change.url) !== attached.get(tabId)?.key) serialize(() => detach(tabId, true));
   if (change.splitViewId !== undefined && [...attached.values()].some(app => app.windowId === tab.windowId)) {
     serialize(() => sync(tab.windowId));

@@ -35,6 +35,12 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     showStopped("The Windows helper stopped. Your desktop app may still be open.");
   } else if (message.command === "attachmentFailed") {
     showStopped("Windows couldn’t display this window in Chrome. It was returned to the desktop.");
+  } else if (message.command === "reconnecting") {
+    showApp({label, reconnecting: true});
+  } else if (message.command === "reconnected") {
+    showApp(message.result);
+  } else if (message.command === "reconnectError") {
+    showStopped(message.message);
   } else if (message.command === "returnedToDesktop") {
     status.textContent = "This app has returned to the desktop.";
     openApp.hidden = true;
@@ -45,6 +51,10 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
 async function loadApp(command) {
   const {result, error} = await chrome.runtime.sendMessage({command});
   if (error) throw new Error(error);
+  showApp(result);
+}
+
+function showApp(result) {
   if (!result) {
     status.textContent = "This tab has no saved app. Use Chamie to attach an open window.";
     return;
@@ -53,13 +63,17 @@ async function loadApp(command) {
   document.title = label;
   openApp.hidden = !result.canOpen;
   recovery.hidden = true;
+  if (result.reconnecting) {
+    status.textContent = "Waiting for the desktop app to come back…";
+    return;
+  }
   if (result.canOpen) {
     status.textContent = "The original window is unavailable. Open the app again?";
     return;
   }
   status.textContent = "Enlarge this Chrome window if part of the app is cropped.";
   if (!result.icon?.startsWith("data:image/png;base64,")) return;
-  const icon = document.createElement("link");
+  const icon = document.querySelector("link[rel=icon]") ?? document.createElement("link");
   icon.rel = "icon";
   icon.type = "image/png";
   icon.href = result.icon;

@@ -534,6 +534,7 @@ def main():
         for tab, state in list(states.items()):
             if identity(state["handle"]) != (state["thread"],state["pid"]):
                 detach(tab)
+                send({"closed": tab, "since": str(int((time.time() - 10) * 10_000_000) + 116444736000000000)})
                 continue
             chrome = state.get("browser")
             window_id = state.get("window_id")
@@ -590,6 +591,10 @@ def main():
                     requested = msg.get("windowId")
                     known = next((state["browser"] for state in states.values()
                                   if state.get("window_id") == requested and state.get("browser")),None)
+                    if not known and msg.get("reconnect"):
+                        previous, previous_identity = listed_browsers.get(requested, (None, None))
+                        if previous and identity(previous) == previous_identity:
+                            known = previous
                     chrome = known or (browser if config_path.is_file() and browser else find_browser())
                     listed_browsers[requested] = chrome, identity(chrome)
                     windows = list_windows(chrome)
@@ -642,6 +647,11 @@ def main():
                                        if item["handle"] not in used and item["handle"] not in excluded
                                        and (process_app_id(item["pid"]) == app_id if app_id
                                             else Path(process_path(item["pid"])) == path)]
+                            since = msg.get("since")
+                            if isinstance(since, str) and since.isdecimal():
+                                matches = [item for item in matches
+                                           if (started := process_started(item["pid"]))
+                                           and int(started) >= int(since) and started != msg.get("originalStarted")]
                             reply["result"] = matches
                 elif command == "attach":
                     window_id = msg.get("windowId")
