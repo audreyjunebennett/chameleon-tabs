@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+*.log
+.venv/
+restore-windows.json
+restore-windows.tmp
+fixture.json

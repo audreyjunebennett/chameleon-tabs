@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Desktop App Tabs</title>
+  <link rel="stylesheet" href="picker.css">
+  <script src="picker.js" defer></script>
+</head>
+<body>
+  <header>
+    <img class="mascot" src="icons/chameleon-128.png" width="42" height="42" alt="">
+    <div>
+      <h1>Desktop App Tabs</h1>
+      <p>Bring your desktop apps into Chrome tabs.</p>
+    </div>
+  </header>
+  <main aria-labelledby="windows-heading">
+    <h2 id="windows-heading">Attach an open window</h2>
+    <div id="windows"></div>
+    <p id="status" role="status">Looking for windows…</p>
+  </main>
+  <footer>
+    <button type="button" id="detach">Return all apps to desktop</button>
+  </footer>
+</body>
+</html>
