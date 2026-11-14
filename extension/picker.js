@@ -2,6 +2,18 @@ const windows = document.getElementById("windows");
 const status = document.getElementById("status");
 const detach = document.getElementById("detach");
 const setup = document.getElementById("setup");
+const browserTab = chrome.tabs.query({active: true, currentWindow: true}).then(([tab]) => tab);
+const pickerLifetime = chrome.runtime.connect({name: "picker"});
+browserTab.then(tab => {
+  if (Number.isInteger(tab?.windowId)) pickerLifetime.postMessage({windowId: tab.windowId});
+}).catch(() => {});
+
+async function fade() {
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const animation = document.body.animate([{opacity: 1}, {opacity: 0}], {duration: 110, fill: "forwards"});
+  await animation.finished;
+  return animation;
+}
 
 document.getElementById("settings").addEventListener("click", async () => {
   try {
@@ -24,7 +36,7 @@ function showError(error) {
 }
 
 async function send(command, fields = {}) {
-  const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
+  const tab = await browserTab;
   const response = await chrome.runtime.sendMessage({command, windowId: tab?.windowId, ...fields});
   if (response.error) throw Object.assign(new Error(response.error), {code: response.code});
   return response.result;
@@ -34,10 +46,13 @@ async function attach(item) {
   windows.inert = true;
   detach.disabled = true;
   status.textContent = "Attaching…";
+  let animation;
   try {
+    animation = await fade();
     await send("attach", item);
     window.close();
   } catch (error) {
+    animation?.cancel();
     showError(error);
     windows.inert = false;
     detach.disabled = false;
@@ -66,10 +81,13 @@ document.addEventListener("keydown", event => {
 detach.addEventListener("click", async () => {
   windows.inert = true;
   detach.disabled = true;
+  let animation;
   try {
+    animation = await fade();
     await send("detachAll");
     window.close();
   } catch (error) {
+    animation?.cancel();
     showError(error);
     windows.inert = false;
     detach.disabled = false;

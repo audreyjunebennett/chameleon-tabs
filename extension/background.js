@@ -272,6 +272,22 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   );
   return true;
 });
+chrome.runtime.onConnect.addListener(port => {
+  if (port.name !== "picker" || port.sender?.url !== chrome.runtime.getURL("picker.html") || port.sender.tab) return;
+  let windowId;
+  let connected = true;
+  port.onMessage.addListener(message => {
+    if (!connected || windowId !== undefined || !Number.isInteger(message?.windowId)) return;
+    windowId = message.windowId;
+    serialize(() => request("pickerOpen", {windowId})).catch(() => {});
+  });
+  port.onDisconnect.addListener(() => {
+    connected = false;
+    serialize(() => {
+      if (bridge && windowId !== undefined) return request("pickerClosed", {windowId});
+    }).catch(() => {});
+  });
+});
 chrome.tabs.onActivated.addListener(({windowId}) => {
   serialize(async () => {
     if ([...attached.values()].some(tab => tab.windowId === windowId)) await sync(windowId);

@@ -498,6 +498,7 @@ def main():
     states = {}
     active_tabs = {}
     split_panes = {}
+    open_pickers = {}
     selected_window_id = None
     listed_browsers = {}
 
@@ -567,6 +568,9 @@ def main():
                 continue
             chrome = state.get("browser")
             window_id = state.get("window_id")
+            if window_id in open_pickers:
+                update_window(state,chrome,None)
+                continue
             if chrome and identity(chrome) != tuple(state["browser_identity"]):
                 update_window(state,chrome,None)
                 continue  # Chrome may remove the source window during a tab move.
@@ -616,6 +620,16 @@ def main():
                 if command == "recover":
                     # Startup has already restored any windows left by a stopped helper.
                     pass
+                elif command in {"pickerOpen", "pickerClosed"}:
+                    window_id = msg.get("windowId")
+                    count = open_pickers.get(window_id, 0) + (1 if command == "pickerOpen" else -1)
+                    if count > 0:
+                        open_pickers[window_id] = count
+                    else:
+                        open_pickers.pop(window_id, None)
+                    failed = refresh()
+                    if failed:
+                        send({"failed": failed})
                 elif command == "list":
                     requested = msg.get("windowId")
                     known = next((state["browser"] for state in states.values()
