@@ -426,7 +426,9 @@ def update_window(state, browser, bounds, foreground_group=False):
         state["modified"] = True
         flags |= c.SWP_FRAMECHANGED
     actual = g.GetWindowRect(app)
-    changed = state.get("applied_bounds") != bounds or state.get("actual_bounds") != actual
+    app_dpi = ctypes.windll.user32.GetDpiForWindow(app)
+    changed = (state.get("applied_bounds") != bounds or state.get("actual_bounds") != actual
+               or state.get("applied_dpi") != app_dpi)
     if changed:
         # Keep the app visible during a resize. Chromium-based apps can leave their
         # content at the old surface size if we hide them while resizing the frame.
@@ -449,6 +451,9 @@ def update_window(state, browser, bounds, foreground_group=False):
             apply_region(app,state["original_region"],clip)
             state["clip"] = clip
         state["applied_bounds"],state["actual_bounds"] = bounds,actual
+        # Save the DPI from before the move so the next pass can refit after
+        # Windows notifies the app that it has crossed to another display.
+        state["applied_dpi"] = app_dpi
     showing = not g.IsWindowVisible(app)
     if showing:
         g.SetWindowPos(app,0,0,0,0,0,c.SWP_SHOWWINDOW | c.SWP_NOACTIVATE |
@@ -522,7 +527,7 @@ def main():
         left, top = g.ClientToScreen(chrome, (left,top))
         right, bottom = g.ClientToScreen(chrome, (right,bottom))
         size = state.get("viewport")
-        toolbar_height = state.get("toolbar_height")
+        dpi = ctypes.windll.user32.GetDpiForWindow(chrome)
         # Select the renderer that fills the pane. Chrome can keep other child
         # renderers around, including one for a toolbar popup.
         for include_hidden in (False, True):
@@ -533,9 +538,11 @@ def main():
                 panes = [(x,y,r,b) for x,y,r,b in panes if abs((b-y)-size[1]) <= 2]
             if len(panes) == 1:
                 x,y,r,b = panes[0]
-                state["toolbar_height"] = y-top
+                if dpi:
+                    state["toolbar_height_at_96_dpi"] = (y-top) * 96 / dpi
                 return max(x,left),y,min(r,right),min(b,bottom)
-        if not size or toolbar_height is None:
+        toolbar_height_at_96_dpi = state.get("toolbar_height_at_96_dpi")
+        if not size or toolbar_height_at_96_dpi is None or not dpi:
             return None
         # Chrome can discard the renderer HWND when covered. The extension page
         # still reports its physical size, and the viewport ends at the client bottom.
@@ -543,6 +550,7 @@ def main():
         x, y = left, bottom-height
         # A viewport report can be in flight during a resize.
         # Reject stale dimensions before they can cover browser controls.
+        toolbar_height = round(toolbar_height_at_96_dpi * dpi / 96)
         if width < 100 or height < 100 or abs(width-(right-left)) > 2 or y < top + toolbar_height - 2:
             return None
         return x, y, min(x+width,right), bottom
@@ -722,7 +730,7 @@ def main():
                         if time.monotonic() >= deadline:
                             raise RuntimeError("Could not locate the destination Chrome window. Select the app tab to retry.")
                         time.sleep(.05)
-                    states[tab].pop("toolbar_height",None)
+                    states[tab].pop("toolbar_height_at_96_dpi",None)
                     states[tab].update(browser=chrome,browser_identity=identity(chrome),window_id=msg["windowId"])
                 elif command == "viewport" and tab in states:
                     width,height = msg.get("width"),msg.get("height")

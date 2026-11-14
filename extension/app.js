@@ -16,6 +16,13 @@ function reportViewport() {
   }).catch(() => {});
 }
 window.addEventListener("resize", reportViewport);
+function watchDisplayScale() {
+  matchMedia(`(resolution: ${devicePixelRatio}dppx)`).addEventListener("change", () => {
+    reportViewport();
+    watchDisplayScale();
+  }, {once: true});
+}
+watchDisplayScale();
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) reportViewport();
 });
